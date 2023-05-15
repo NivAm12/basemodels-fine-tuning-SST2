@@ -7,7 +7,7 @@ import numpy as np
 
 def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, compute_metrics, train_samples: int = -1, val_samples: int = -1,
                       test_samples: int = -1, num_seeds: int = None):
-    train_args = TrainingArguments(output_dir='outputs', report_to='wandb', use_mps_device=True)
+    train_args = TrainingArguments(output_dir='outputs', report_to='wandb')
 
     # run on each seed
     for seed in range(num_seeds):
@@ -18,22 +18,19 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
         
         # run on the models
         for model_name in models_names:
-            # load model and tokernizer
+            # load model and tokernizery
             model, tokenizer = load_model(model_name)
 
             # preprocess dataset splits with the model tokenizer
             train_dataset = preprocess_dataset(dataset['train'], tokenizer, preprocess_func)
             val_dataset = preprocess_dataset(dataset['val'], tokenizer, preprocess_func)
-            train_dataset = preprocess_dataset(dataset['test'], tokenizer, preprocess_func)
+            test_datsset = preprocess_dataset(dataset['test'], tokenizer, preprocess_func)
 
             # fine tune the model
             train_res, trainer = train(model=model, tokenizer=tokenizer, train_dataset=train_dataset, val_dataset=val_dataset, train_args=train_args, 
                                compute_metrics_fn=compute_metrics)
             
             print(train_res)
-            
-            
-            
 
 
 def train(model, tokenizer, train_dataset, val_dataset, train_args, compute_metrics_fn):
@@ -98,10 +95,9 @@ def compute_metrics_func(eval_pred):
 if __name__ == '__main__':
     models = ['bert-base-uncased']
     dataset = 'sst2'
-    train_samples = 100
-    val_samples = 100
+    train_samples = -1
     num_seeds = 1
 
-    fine_tune_models(models, dataset, train_samples=train_samples, val_samples=val_samples, preprocess_func=preprocess_func,
+    fine_tune_models(models, dataset, train_samples=train_samples, preprocess_func=preprocess_func,
                       compute_metrics=compute_metrics_func, num_seeds=num_seeds)
     
