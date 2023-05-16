@@ -41,7 +41,6 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
                 "eval_accuracy": eval_accuracy
             })
 
-        # compute metrics for the model, and save the result for this model
         # Extract the eval_accuracy values from the model_results list
         eval_accuracies = [result["eval_accuracy"] for result in model_results]
 
@@ -51,7 +50,7 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
 
         # Find the seed corresponding to the maximum eval_accuracy, due the order of the list we can know ths seed
         max_accuracy_seed = np.argmax(eval_accuracies)
-        max_accuracy_model = model_results[max_accuracy_seed]["model"]
+        max_accuracy_model = model_results[max_accuracy_seed]["model_checkpoint"]
 
         models_result[model_name] = {
             "model": max_accuracy_model,
@@ -59,6 +58,10 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
             "std": std_accuracy,
             "mean": mean_accuracy
         }
+
+    # pick and save the best model from all the runs
+    best_model_name = max(models_result, key=lambda model_name: models_result[model_name]["mean"])
+    best_model = models_result[best_model_name]["model"]
 
 
 def train(model, tokenizer, train_dataset, val_dataset, train_args, compute_metrics_fn):
@@ -121,10 +124,10 @@ def compute_metrics_func(eval_pred):
 
 
 if __name__ == '__main__':
-    models = ['bert-base-uncased']
+    models = ['bert-base-uncased', 'roberta-base', 'google/electra-base-generator']
     dataset = 'sst2'
     train_samples = 100
-    num_seeds = 3
+    num_seeds = 1
 
     fine_tune_models(models, dataset, train_samples=train_samples, preprocess_func=preprocess_func,
                       compute_metrics=compute_metrics_func, num_seeds=num_seeds)
