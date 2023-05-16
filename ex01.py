@@ -3,11 +3,11 @@ from datasets import load_dataset, Dataset
 from evaluate import load
 import torch
 import numpy as np
+import wandb
 
 
 def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, compute_metrics, train_samples: int = -1,
                      val_samples: int = -1, test_samples: int = -1, num_seeds: int = None):
-    train_args = TrainingArguments(output_dir='outputs', report_to='wandb', save_strategy="no")
     total_train_time = 0.0
     models_result = {model_name: None for model_name in models_names}
 
@@ -17,6 +17,8 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
         # run on the seeds
         for seed in range(num_seeds):
             torch.manual_seed(seed)
+            train_args = TrainingArguments(output_dir='outputs', report_to='wandb', save_strategy="no",
+                                           run_name=f'{model_name}_seed{seed}')
             # load datasets
             dataset = load_data(dataset_name=dataset_name, train_samples=train_samples, val_samples=val_samples,
                                 test_samples=test_samples)
@@ -40,6 +42,9 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
                 "model_checkpoint": model,
                 "eval_accuracy": eval_accuracy
             })
+
+            # finish the current run
+            wandb.finish()
 
         # Extract the eval_accuracy values from the model_results list
         eval_accuracies = [result["eval_accuracy"] for result in model_results]
@@ -126,9 +131,8 @@ def compute_metrics_func(eval_pred):
 if __name__ == '__main__':
     models = ['bert-base-uncased', 'roberta-base', 'google/electra-base-generator']
     dataset = 'sst2'
-    train_samples = 100
-    num_seeds = 1
+    num_seeds = 3
 
-    fine_tune_models(models, dataset, train_samples=train_samples, preprocess_func=preprocess_func,
+    fine_tune_models(models, dataset, preprocess_func=preprocess_func,
                       compute_metrics=compute_metrics_func, num_seeds=num_seeds)
     
