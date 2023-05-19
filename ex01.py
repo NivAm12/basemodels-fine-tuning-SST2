@@ -1,7 +1,6 @@
-from transformers import AutoConfig, AutoTokenizer, AutoModelForSequenceClassification, Trainer, DataCollatorWithPadding, TrainingArguments
+from transformers import AutoConfig, EvalPrediction, AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments, set_seed
 from datasets import load_dataset, Dataset
 from evaluate import load
-import torch
 import numpy as np
 import wandb
 
@@ -10,15 +9,15 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
                      val_samples: int = -1, test_samples: int = -1, num_seeds: int = None):
     total_train_time = 0.0
     models_result = {model_name: None for model_name in models_names}
-
+    
     # run on each model
     for model_name in models_names:
         model_results = []
         # run on the seeds
         for seed in range(num_seeds):
-            torch.manual_seed(seed)
+            set_seed(seed)
             train_args = TrainingArguments(output_dir='outputs', report_to='wandb', save_strategy="no",
-                                           run_name=f'{model_name}_seed{seed}')
+                                           run_name=f'{model_name}_seed{seed}', use_mps_device=True)
             # load datasets
             dataset = load_data(dataset_name=dataset_name, train_samples=train_samples, val_samples=val_samples,
                                 test_samples=test_samples)
@@ -29,6 +28,7 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
             # preprocess dataset splits with the model tokenizer
             train_dataset = preprocess_dataset(dataset['train'], tokenizer, preprocess_func)
             val_dataset = preprocess_dataset(dataset['val'], tokenizer, preprocess_func)
+            test_dataset = preprocess_dataset(dataset['test'], tokenizer, preprocess_func, for_prediction=True)
 
             # fine tune the model
             train_res, trainer = train(model=model, tokenizer=tokenizer, train_dataset=train_dataset, val_dataset=val_dataset, train_args=train_args, 
@@ -53,13 +53,12 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
         mean_accuracy = np.mean(eval_accuracies)
         std_accuracy = np.std(eval_accuracies)
 
-        # Find the seed corresponding to the maximum eval_accuracy, due the order of the list we can know ths seed
-        max_accuracy_seed = np.argmax(eval_accuracies)
-        max_accuracy_model = model_results[max_accuracy_seed]["model_checkpoint"]
+        # Find the seed corresponding to the maximum eval_accuracy
+        max_accuracy_seed_index = np.argmax(eval_accuracies)
+        max_accuracy_model = model_results[max_accuracy_seed_index]["model_checkpoint"]
 
         models_result[model_name] = {
             "model": max_accuracy_model,
-            "seed": max_accuracy_seed,
             "std": std_accuracy,
             "mean": mean_accuracy
         }
@@ -70,15 +69,14 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
 
 
 def train(model, tokenizer, train_dataset, val_dataset, train_args, compute_metrics_fn):
-    data_collator = DataCollatorWithPadding(tokenizer)
 
     trainer = Trainer(
         model=model,
         args=train_args,
-        data_collator=data_collator,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         compute_metrics=compute_metrics_fn,
+        tokenizer=tokenizer
     )
 
     train_res = trainer.train()
@@ -110,29 +108,35 @@ def preprocess_func(examples, tokenizer):
     return tokenizer(examples["sentence"], truncation=True)
 
 
-def preprocess_dataset(dataset, tokenizer, preprocess_fn):
-  tokenized_datasets = dataset.map(preprocess_fn, fn_kwargs={"tokenizer": tokenizer}, batched=True, batch_size=None)
-  tokenized_datasets = tokenized_datasets.remove_columns(["idx", "sentence"])
-  tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
-  tokenized_datasets = tokenized_datasets.with_format("torch")
+def preprocess_dataset(dataset: Dataset, tokenizer, preprocess_fn, for_prediction=False):
+    tokenized_datasets = dataset.map(preprocess_fn, fn_kwargs={"tokenizer": tokenizer})
 
-  return tokenized_datasets
+    if for_prediction:
+        tokenized_datasets = tokenized_datasets.remove_columns(["label", "idx", "sentence"])
+        tokenized_datasets.set_format('pt', output_all_columns=True)
+
+    return tokenized_datasets
 
 
-def compute_metrics_func(eval_pred):
+def compute_metrics_func(eval_pred: EvalPrediction):
     metric = load("accuracy")
-
+    
     logits, labels = eval_pred
     predictions = np.argmax(logits, axis=-1)
 
     return metric.compute(predictions=predictions, references=labels)
 
 
-if __name__ == '__main__':
-    models = ['bert-base-uncased', 'roberta-base', 'google/electra-base-generator']
-    dataset = 'sst2'
-    num_seeds = 3
+def predict(model, test_set):
+    pass
 
-    fine_tune_models(models, dataset, preprocess_func=preprocess_func,
+
+if __name__ == '__main__':
+    models = ['bert-base-uncased']
+    dataset = 'sst2'
+    num_seeds = 1
+    num_train = 100
+
+    fine_tune_models(models, dataset, train_samples=num_train ,preprocess_func=preprocess_func,
                       compute_metrics=compute_metrics_func, num_seeds=num_seeds)
     
