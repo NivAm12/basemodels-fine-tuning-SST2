@@ -17,7 +17,7 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
         for seed in range(num_seeds):
             set_seed(seed)
             train_args = TrainingArguments(output_dir='outputs', report_to='wandb', save_strategy="no",
-                                           run_name=f'{model_name}_seed{seed}', use_mps_device=True)
+                                           run_name=f'{model_name}_seed{seed}')
             # load datasets
             dataset = load_data(dataset_name=dataset_name, train_samples=train_samples, val_samples=val_samples,
                                 test_samples=test_samples)
