@@ -1,4 +1,5 @@
-from transformers import AutoConfig, EvalPrediction, AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments, set_seed
+from transformers import AutoConfig, EvalPrediction, AutoTokenizer, AutoModelForSequenceClassification, Trainer, \
+    TrainingArguments, set_seed
 from datasets import load_dataset, Dataset
 from evaluate import load
 import numpy as np
@@ -6,12 +7,12 @@ import wandb
 import os
 import sys
 
-
 # consts
 MODELS_RESULTS_PATH = 'res.txt'
 PREDICT_PATH = 'predictions.txt'
 OUTPUT_DIR = 'output'
 PROJECT = 'anlp_ex01_results'
+
 
 def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, compute_metrics, train_samples: int = -1,
                      val_samples: int = -1, test_samples: int = -1, num_seeds: int = 1):
@@ -20,7 +21,7 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
 
     total_train_time = 0.0
     models_result = {model_name: None for model_name in models_names}
-    
+
     # run on each model
     for model_name in models_names:
         model_results = []
@@ -43,8 +44,9 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
             val_dataset = preprocess_dataset(dataset['val'], tokenizer, preprocess_func)
 
             # fine tune the model
-            train_res, trainer = train(model=model, tokenizer=tokenizer, train_dataset=train_dataset, val_dataset=val_dataset, train_args=train_args, 
-                               compute_metrics_fn=compute_metrics)
+            train_res, trainer = train(model=model, tokenizer=tokenizer, train_dataset=train_dataset,
+                                       val_dataset=val_dataset, train_args=train_args,
+                                       compute_metrics_fn=compute_metrics)
 
             # evaluate and save results
             model_path = OUTPUT_DIR + '/' + model_name_to_save
@@ -84,16 +86,16 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
     best_model_name = max(models_result, key=lambda model_name: models_result[model_name]["mean"])
     best_model_path = models_result[best_model_name]["model_path"]
     print(f'Best model was {best_model_name} model')
-    
+
     # predict test dataset
     labeled_results, predict_runtime = predict(best_model_name, best_model_path, dataset['test'])
 
     # log results
-    log_results_files(models_result, labeled_results, total_train_time, predict_runtime, MODELS_RESULTS_PATH, PREDICT_PATH)
+    log_results_files(models_result, labeled_results, total_train_time, predict_runtime,
+                      MODELS_RESULTS_PATH, PREDICT_PATH)
 
 
 def train(model, tokenizer, train_dataset, val_dataset, train_args, compute_metrics_fn):
-
     trainer = Trainer(
         model=model,
         args=train_args,
@@ -112,7 +114,7 @@ def load_model(model_name, local_pretrained_path=None):
     config = AutoConfig.from_pretrained(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSequenceClassification.from_pretrained(local_pretrained_path) if local_pretrained_path \
-            else AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
+        else AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
 
     return model, tokenizer
 
@@ -145,7 +147,7 @@ def preprocess_dataset(dataset: Dataset, tokenizer, preprocess_fn, for_predictio
 
 def compute_metrics_func(eval_pred: EvalPrediction):
     metric = load("accuracy")
-    
+
     logits, labels = eval_pred
     predictions = np.argmax(logits, axis=-1)
 
@@ -173,20 +175,20 @@ def predict(model_name, model_path, test_set):
 
     # create the results with their original sentences 
     labeled_results = [{'sentence': str(test_set[i]['sentence']), 'label': predictions[i]}
-                        for i in range(len(test_set))]
+                       for i in range(len(test_set))]
 
     return labeled_results, test_runtime
 
 
 def log_results_files(models_results, labeled_results, train_time, predict_time, statistics_file_path,
-                       predictions_file_path):
+                      predictions_file_path):
     # create statistics file
     with open(statistics_file_path, 'w') as statistics_file:
         for model_name, model_stats in models_results.items():
             row = f"{model_name}, {model_stats['mean']}\t{model_stats['std']}"
             statistics_file.write(row + '\n')
 
-        statistics_file.write(f'train time, {train_time}\n')     
+        statistics_file.write(f'train time, {train_time}\n')
         statistics_file.write(f'predict time, {predict_time}')
 
     # create prediction file
@@ -199,10 +201,10 @@ def log_results_files(models_results, labeled_results, train_time, predict_time,
 def are_args_validate(args):
     for i in range(len(args)):
         arg_to_test = int(args[i])
-        if(arg_to_test < -1 or arg_to_test == 0):
+        if arg_to_test < -1 or arg_to_test == 0:
             return False
 
-    return True    
+    return True
 
 
 if __name__ == '__main__':
@@ -225,6 +227,6 @@ if __name__ == '__main__':
     num_val_examples = int(sys.argv[3])
     num_test_examples = int(sys.argv[4])
 
-    fine_tune_models(models, dataset, train_samples=num_train_examples, val_samples=num_val_examples, test_samples=num_test_examples, preprocess_func=preprocess_func,
-                      compute_metrics=compute_metrics_func, num_seeds=num_seeds_arg)
-    
+    fine_tune_models(models, dataset, train_samples=num_train_examples, val_samples=num_val_examples,
+                     test_samples=num_test_examples, preprocess_func=preprocess_func,
+                     compute_metrics=compute_metrics_func, num_seeds=num_seeds_arg)
