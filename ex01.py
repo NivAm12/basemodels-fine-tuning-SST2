@@ -17,7 +17,7 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
         for seed in range(num_seeds):
             set_seed(seed)
             train_args = TrainingArguments(output_dir='outputs', report_to='wandb', save_strategy="no",
-                                           run_name=f'{model_name}_seed{seed}')
+                                           run_name=f'{model_name}_seed{seed}', use_mps_device=True)
             # load datasets
             dataset = load_data(dataset_name=dataset_name, train_samples=train_samples, val_samples=val_samples,
                                 test_samples=test_samples)
@@ -28,7 +28,6 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
             # preprocess dataset splits with the model tokenizer
             train_dataset = preprocess_dataset(dataset['train'], tokenizer, preprocess_func)
             val_dataset = preprocess_dataset(dataset['val'], tokenizer, preprocess_func)
-            test_dataset = preprocess_dataset(dataset['test'], tokenizer, preprocess_func, for_prediction=True)
 
             # fine tune the model
             train_res, trainer = train(model=model, tokenizer=tokenizer, train_dataset=train_dataset, val_dataset=val_dataset, train_args=train_args, 
@@ -66,6 +65,11 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
     # pick and save the best model from all the runs
     best_model_name = max(models_result, key=lambda model_name: models_result[model_name]["mean"])
     best_model = models_result[best_model_name]["model"]
+    
+    test_dataset = preprocess_dataset(dataset['test'], tokenizer, preprocess_func, for_prediction=True)
+    labeled_results, predict_runtime = predict(best_model, test_dataset)
+
+    print(predict_runtime)
 
 
 def train(model, tokenizer, train_dataset, val_dataset, train_args, compute_metrics_fn):
@@ -110,11 +114,11 @@ def preprocess_func(examples, tokenizer):
 
 def preprocess_dataset(dataset: Dataset, tokenizer, preprocess_fn, for_prediction=False):
     tokenized_datasets = dataset.map(preprocess_fn, fn_kwargs={"tokenizer": tokenizer})
+    tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
+    tokenized_datasets.set_format("torch")
 
     if for_prediction:
-        tokenized_datasets = tokenized_datasets.remove_columns(["label", "idx", "sentence"])
-        tokenized_datasets.set_format('pt', output_all_columns=True)
-
+        tokenized_datasets = tokenized_datasets.remove_columns(['labels'])
     return tokenized_datasets
 
 
@@ -128,15 +132,33 @@ def compute_metrics_func(eval_pred: EvalPrediction):
 
 
 def predict(model, test_set):
-    pass
+    # create a trainer for prediction
+    test_args = TrainingArguments(output_dir='outputs', use_mps_device=True)
+    test_args.set_testing(batch_size=1)
+
+    test_trainer = Trainer(
+        model=model,
+        args=test_args
+    )
+
+    test_result = test_trainer.predict(test_set)
+    test_runtime = test_result.metrics['test_runtime']
+    predictions = np.argmax(test_result.predictions, axis=-1)
+
+    # create the results with their original sentences 
+    labeled_results = [{'sentence': str(test_set[i]['sentence']), 'label': predictions[i]}
+                        for i in range(len(test_set))]
+
+    return labeled_results, test_runtime
 
 
 if __name__ == '__main__':
     models = ['bert-base-uncased']
     dataset = 'sst2'
     num_seeds = 1
-    num_train = 100
+    num_train = 1000
+    num_test = 20
 
-    fine_tune_models(models, dataset, train_samples=num_train ,preprocess_func=preprocess_func,
+    fine_tune_models(models, dataset, train_samples=num_train, test_samples=num_test, preprocess_func=preprocess_func,
                       compute_metrics=compute_metrics_func, num_seeds=num_seeds)
     
