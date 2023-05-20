@@ -6,14 +6,14 @@ import wandb
 import os
 
 
+# consts
+MODELS_RESULTS_PATH = 'res.txt'
+PREDICT_PATH = 'predictions.txt'
+OUTPUT_DIR = 'output'
+PROJECT = 'anlp_ex01_results'
+
 def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, compute_metrics, train_samples: int = -1,
                      val_samples: int = -1, test_samples: int = -1, num_seeds: int = 1):
-    # consts
-    MODELS_RESULTS_PATH = 'res.txt'
-    PREDICT_PATH = 'predictions.txt'
-    OUTPUT_DIR = 'output'
-    PROJECT = 'anlp_ex01_results'
-
     # set wandb project name
     os.environ['WANDB_PROJECT'] = PROJECT
 
@@ -26,9 +26,11 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
         # run on the seeds
         for seed in range(num_seeds):
             set_seed(seed)
+            model_name_to_save = f'{model_name}_seed{seed}'
+
             train_args = TrainingArguments(output_dir=OUTPUT_DIR, report_to='wandb', save_strategy="no",
-                                           run_name=f'{model_name}_seed{seed}',
-                                             use_mps_device=True,)
+                                           run_name=model_name_to_save,
+                                             use_mps_device=True)
             # load datasets
             dataset = load_data(dataset_name=dataset_name, train_samples=train_samples, val_samples=val_samples,
                                 test_samples=test_samples)
@@ -45,11 +47,14 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
                                compute_metrics_fn=compute_metrics)
 
             # evaluate and save results
+            model_path = OUTPUT_DIR + '/' + model_name_to_save
+
             eval_metrics = trainer.evaluate(eval_dataset=val_dataset)
             total_train_time += train_res.metrics['train_runtime']
             eval_accuracy = eval_metrics['eval_accuracy']
             model_results.append({
-                "model_checkpoint": model,
+                "model_checkpoint": model_path,
+                "trainer": trainer,
                 "eval_accuracy": eval_accuracy
             })
 
@@ -63,23 +68,25 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
         mean_accuracy = np.mean(eval_accuracies)
         std_accuracy = np.std(eval_accuracies)
 
-        # Find the seed corresponding to the maximum eval_accuracy
+        # Find the seed corresponding to the maximum eval_accuracy and save the model
         max_accuracy_seed_index = np.argmax(eval_accuracies)
-        max_accuracy_model = model_results[max_accuracy_seed_index]["model_checkpoint"]
+        max_accuracy_model_path = model_results[max_accuracy_seed_index]["model_checkpoint"]
+        max_accuracy_model_trainer = model_results[max_accuracy_seed_index]["trainer"]
+        max_accuracy_model_trainer.save_model(max_accuracy_model_path)
 
         models_result[model_name] = {
-            "model": max_accuracy_model,
+            "model_path": max_accuracy_model_path,
             "std": std_accuracy,
             "mean": mean_accuracy
         }
 
     # pick the best model from all the runs
     best_model_name = max(models_result, key=lambda model_name: models_result[model_name]["mean"])
-    best_model = models_result[best_model_name]["model"]
+    best_model_path = models_result[best_model_name]["model_path"]
     print(f'Best model was {best_model_name} model')
     
     # predict test dataset
-    labeled_results, predict_runtime = predict(best_model_name, best_model, dataset['test'])
+    labeled_results, predict_runtime = predict(best_model_name, best_model_path, dataset['test'])
 
     # log results
     log_results_files(models_result, labeled_results, total_train_time, predict_runtime, MODELS_RESULTS_PATH, PREDICT_PATH)
@@ -101,10 +108,11 @@ def train(model, tokenizer, train_dataset, val_dataset, train_args, compute_metr
     return train_res, trainer
 
 
-def load_model(model_name):
+def load_model(model_name, local_pretrained_path=None):
     config = AutoConfig.from_pretrained(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
+    model = AutoModelForSequenceClassification.from_pretrained(local_pretrained_path) if local_pretrained_path \
+            else AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
 
     return model, tokenizer
 
@@ -144,13 +152,13 @@ def compute_metrics_func(eval_pred: EvalPrediction):
     return metric.compute(predictions=predictions, references=labels)
 
 
-def predict(model_name, model, test_set):
-    # prepare the data
-    predict_tokenizer = AutoTokenizer.from_pretrained(model_name)
-    test_dataset = preprocess_dataset(test_set, predict_tokenizer, preprocess_func, for_prediction=True)
+def predict(model_name, model_path, test_set):
+    # prepare the data and models
+    model, tokenizer = load_model(model_name, model_path)
+    test_dataset = preprocess_dataset(test_set, tokenizer, preprocess_func, for_prediction=True)
 
     # create a trainer for prediction
-    test_args = TrainingArguments(output_dir='outputs', use_mps_device=True)
+    test_args = TrainingArguments(output_dir=OUTPUT_DIR, use_mps_device=True)
     test_args.set_testing(batch_size=1)
 
     test_trainer = Trainer(
@@ -158,6 +166,7 @@ def predict(model_name, model, test_set):
         args=test_args
     )
 
+    # predict 
     test_result = test_trainer.predict(test_dataset)
     test_runtime = test_result.metrics['test_runtime']
     predictions = np.argmax(test_result.predictions, axis=-1)
@@ -191,7 +200,7 @@ if __name__ == '__main__':
     models = ['bert-base-uncased', 'roberta-base', 'google/electra-base-generator']
     dataset = 'sst2'
     num_seeds = 3
-    num_train = 50
+    num_train = 1000
     num_test = 20
 
     fine_tune_models(models, dataset, train_samples=num_train, test_samples=num_test, preprocess_func=preprocess_func,
