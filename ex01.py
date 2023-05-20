@@ -3,10 +3,20 @@ from datasets import load_dataset, Dataset
 from evaluate import load
 import numpy as np
 import wandb
+import os
 
 
 def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, compute_metrics, train_samples: int = -1,
-                     val_samples: int = -1, test_samples: int = -1, num_seeds: int = None):
+                     val_samples: int = -1, test_samples: int = -1, num_seeds: int = 1):
+    # consts
+    MODELS_RESULTS_PATH = 'res.txt'
+    PREDICT_PATH = 'predictions.txt'
+    OUTPUT_DIR = 'output'
+    PROJECT = 'anlp_ex01_results'
+
+    # set wandb project name
+    os.environ['WANDB_PROJECT'] = PROJECT
+
     total_train_time = 0.0
     models_result = {model_name: None for model_name in models_names}
     
@@ -16,8 +26,9 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
         # run on the seeds
         for seed in range(num_seeds):
             set_seed(seed)
-            train_args = TrainingArguments(output_dir='outputs', report_to='wandb', save_strategy="no",
-                                           run_name=f'{model_name}_seed{seed}', use_mps_device=True)
+            train_args = TrainingArguments(output_dir=OUTPUT_DIR, report_to='wandb', save_strategy="no",
+                                           run_name=f'{model_name}_seed{seed}',
+                                             use_mps_device=True,)
             # load datasets
             dataset = load_data(dataset_name=dataset_name, train_samples=train_samples, val_samples=val_samples,
                                 test_samples=test_samples)
@@ -62,14 +73,16 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
             "mean": mean_accuracy
         }
 
-    # pick and save the best model from all the runs
+    # pick the best model from all the runs
     best_model_name = max(models_result, key=lambda model_name: models_result[model_name]["mean"])
     best_model = models_result[best_model_name]["model"]
+    print(f'Best model was {best_model_name} model')
     
-    test_dataset = preprocess_dataset(dataset['test'], tokenizer, preprocess_func, for_prediction=True)
-    labeled_results, predict_runtime = predict(best_model, test_dataset)
+    # predict test dataset
+    labeled_results, predict_runtime = predict(best_model_name, best_model, dataset['test'])
 
-    print(predict_runtime)
+    # log results
+    log_results_files(models_result, labeled_results, total_train_time, predict_runtime, MODELS_RESULTS_PATH, PREDICT_PATH)
 
 
 def train(model, tokenizer, train_dataset, val_dataset, train_args, compute_metrics_fn):
@@ -131,7 +144,11 @@ def compute_metrics_func(eval_pred: EvalPrediction):
     return metric.compute(predictions=predictions, references=labels)
 
 
-def predict(model, test_set):
+def predict(model_name, model, test_set):
+    # prepare the data
+    predict_tokenizer = AutoTokenizer.from_pretrained(model_name)
+    test_dataset = preprocess_dataset(test_set, predict_tokenizer, preprocess_func, for_prediction=True)
+
     # create a trainer for prediction
     test_args = TrainingArguments(output_dir='outputs', use_mps_device=True)
     test_args.set_testing(batch_size=1)
@@ -141,7 +158,7 @@ def predict(model, test_set):
         args=test_args
     )
 
-    test_result = test_trainer.predict(test_set)
+    test_result = test_trainer.predict(test_dataset)
     test_runtime = test_result.metrics['test_runtime']
     predictions = np.argmax(test_result.predictions, axis=-1)
 
@@ -152,11 +169,29 @@ def predict(model, test_set):
     return labeled_results, test_runtime
 
 
+def log_results_files(models_results, labeled_results, train_time, predict_time, statistics_file_path,
+                       predictions_file_path):
+    # create statistics file
+    with open(statistics_file_path, 'w') as statistics_file:
+        for model_name, model_stats in models_results.items():
+            row = f"{model_name}, {model_stats['mean']}\t{model_stats['std']}"
+            statistics_file.write(row + '\n')
+
+        statistics_file.write(f'train time, {train_time}\n')     
+        statistics_file.write(f'predict time, {predict_time}')
+
+    # create prediction file
+    with open(predictions_file_path, 'w') as predict_file:
+        for result in labeled_results:
+            row = f"{result['sentence']}###{result['label']}"
+            predict_file.write(row + '\n')
+
+
 if __name__ == '__main__':
-    models = ['bert-base-uncased']
+    models = ['bert-base-uncased', 'roberta-base', 'google/electra-base-generator']
     dataset = 'sst2'
-    num_seeds = 1
-    num_train = 1000
+    num_seeds = 3
+    num_train = 50
     num_test = 20
 
     fine_tune_models(models, dataset, train_samples=num_train, test_samples=num_test, preprocess_func=preprocess_func,
