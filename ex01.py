@@ -4,6 +4,7 @@ from evaluate import load
 import numpy as np
 import wandb
 import os
+import sys
 
 
 # consts
@@ -29,8 +30,7 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
             model_name_to_save = f'{model_name}_seed{seed}'
 
             train_args = TrainingArguments(output_dir=OUTPUT_DIR, report_to='wandb', save_strategy="no",
-                                           run_name=model_name_to_save,
-                                             use_mps_device=True)
+                                           run_name=model_name_to_save)
             # load datasets
             dataset = load_data(dataset_name=dataset_name, train_samples=train_samples, val_samples=val_samples,
                                 test_samples=test_samples)
@@ -158,7 +158,7 @@ def predict(model_name, model_path, test_set):
     test_dataset = preprocess_dataset(test_set, tokenizer, preprocess_func, for_prediction=True)
 
     # create a trainer for prediction
-    test_args = TrainingArguments(output_dir=OUTPUT_DIR, use_mps_device=True)
+    test_args = TrainingArguments(output_dir=OUTPUT_DIR)
     test_args.set_testing(batch_size=1)
 
     test_trainer = Trainer(
@@ -196,13 +196,35 @@ def log_results_files(models_results, labeled_results, train_time, predict_time,
             predict_file.write(row + '\n')
 
 
+def are_args_validate(args):
+    for i in range(len(args)):
+        arg_to_test = int(args[i])
+        if(arg_to_test < -1 or arg_to_test == 0):
+            return False
+
+    return True    
+
+
 if __name__ == '__main__':
     models = ['bert-base-uncased', 'roberta-base', 'google/electra-base-generator']
     dataset = 'sst2'
-    num_seeds = 3
-    num_train = 1000
-    num_test = 20
 
-    fine_tune_models(models, dataset, train_samples=num_train, test_samples=num_test, preprocess_func=preprocess_func,
-                      compute_metrics=compute_metrics_func, num_seeds=num_seeds)
+    # args
+    if len(sys.argv) != 5:
+        print("Missing args for the script")
+        sys.exit(1)
+
+    # validate args
+    validate = are_args_validate(sys.argv[1:])
+    if not validate:
+        print("args are not in the legal range")
+        sys.exit(1)
+
+    num_seeds_arg = int(sys.argv[1])
+    num_train_examples = int(sys.argv[2])
+    num_val_examples = int(sys.argv[3])
+    num_test_examples = int(sys.argv[4])
+
+    fine_tune_models(models, dataset, train_samples=num_train_examples, val_samples=num_val_examples, test_samples=num_test_examples, preprocess_func=preprocess_func,
+                      compute_metrics=compute_metrics_func, num_seeds=num_seeds_arg)
     
