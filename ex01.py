@@ -185,7 +185,7 @@ def log_results_files(models_results, labeled_results, train_time, predict_time,
     # create statistics file
     with open(statistics_file_path, 'w') as statistics_file:
         for model_name, model_stats in models_results.items():
-            row = f"{model_name}, {model_stats['mean']}\t{model_stats['std']}"
+            row = f"{model_name}, {model_stats['mean']}\t+-{model_stats['std']}"
             statistics_file.write(row + '\n')
 
         statistics_file.write(f'train time, {train_time}\n')
