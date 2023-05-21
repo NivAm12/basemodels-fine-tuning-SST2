@@ -188,8 +188,8 @@ def log_results_files(models_results, labeled_results, train_time, predict_time,
             row = f"{model_name}, {model_stats['mean']}\t+-{model_stats['std']}"
             statistics_file.write(row + '\n')
 
-        statistics_file.write(f'train time, {train_time}\n')
-        statistics_file.write(f'predict time, {predict_time}')
+        statistics_file.write(f'train time,{train_time}\n')
+        statistics_file.write(f'predict time,{predict_time}')
 
     # create prediction file
     with open(predictions_file_path, 'w') as predict_file:
