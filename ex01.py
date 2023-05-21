@@ -3,7 +3,7 @@ from transformers import AutoConfig, EvalPrediction, AutoTokenizer, AutoModelFor
 from datasets import load_dataset, Dataset
 from evaluate import load
 import numpy as np
-import wandb
+# import wandb
 import os
 import sys
 
@@ -17,7 +17,7 @@ PROJECT = 'anlp_ex01_results'
 def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, compute_metrics, train_samples: int = -1,
                      val_samples: int = -1, test_samples: int = -1, num_seeds: int = 1):
     # set wandb project name
-    os.environ['WANDB_PROJECT'] = PROJECT
+    # os.environ['WANDB_PROJECT'] = PROJECT
 
     total_train_time = 0.0
     models_result = {model_name: None for model_name in models_names}
@@ -30,8 +30,10 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
             set_seed(seed)
             model_name_to_save = f'{model_name}_seed{seed}'
 
-            train_args = TrainingArguments(output_dir=OUTPUT_DIR, report_to='wandb', save_strategy="no",
-                                           run_name=model_name_to_save)
+            train_args = TrainingArguments(output_dir=OUTPUT_DIR, save_strategy="no", report_to='none')
+            # train_args.report_to = 'wandb'
+            # train_args.run_name = model_name_to_save
+
             # load datasets
             dataset = load_data(dataset_name=dataset_name, train_samples=train_samples, val_samples=val_samples,
                                 test_samples=test_samples)
@@ -61,7 +63,7 @@ def fine_tune_models(models_names: list, dataset_name: str, preprocess_func, com
             })
 
             # finish the current run
-            wandb.finish()
+            # wandb.finish()
 
         # Extract the eval_accuracy values from the model_results list
         eval_accuracies = [result["eval_accuracy"] for result in model_results]
